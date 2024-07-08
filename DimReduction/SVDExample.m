@@ -38,4 +38,5 @@ surf(M)
 title('Original matrix')
 subplot(1, 2, 2)
 surf(approxM)
-title('Approximated matrix')
+totalDifference = sum(sum(abs(M-approxM)));
+title({'Approximated matrix', append('Total Difference Between Matrices: ', num2str(totalDifference))})
