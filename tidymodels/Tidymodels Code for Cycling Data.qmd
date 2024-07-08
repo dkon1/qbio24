@@ -1,0 +1,128 @@
+---
+title: "Tidymodels Code for Cycling Data"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+#Need To Change
+setwd("/Users/ralphharrison/Desktop/Cycling Data/Model_Data")
+#Install Packages
+library(tidymodels)
+library(readr)
+library(broom.mixed)
+library(dotwhisker)
+library(dplyr)
+library(tidyr)
+library(zoo)
+library(kernlab)
+library(baguette)
+library(earth)
+library(parsnip)
+library(timetk)
+library(smooth)
+library(modeltime)
+library(keras)
+```
+
+```{r}
+#Data
+Data <- read.csv("Ralph Cycling Data (Cleaned up).csv")
+split_data <- initial_split(Data,prop=.8, strata=numeric_date)
+train_data <- training(split_data)
+test_data <- testing(split_data)
+#getting rid of X column 
+train_data <-select(train_data, date, heart_rate, power, cadence, temperature,numeric_date)
+test_data <- select(test_data, date, heart_rate, power, cadence, temperature,numeric_date)
+
+```
+
+```{r}
+#Machine Learning Part (Takes a while to finish running)
+#Creating Recipe
+Recipe <- recipe(power ~ ., data = train_data) 
+summary(Recipe)
+#Model
+kernlab_mod <- 
+  svm_poly(
+    mode = "regression",
+    engine = "kernlab",
+    cost = NULL,
+    degree = NULL,
+    scale_factor = NULL,
+    margin = NULL
+  )
+#Creating Workflow
+Recipe_wflow <- 
+  workflow() %>% 
+  add_model(kernlab_mod) %>% 
+  add_recipe(Recipe)
+#Training Model
+Recipe_fit <- 
+  Recipe_wflow %>% 
+  fit(data = train_data)
+#Extracting Fit
+Recipe_fit %>% 
+  extract_fit_parsnip()
+```
+
+```{r}
+# Same Thing But Predicting Heart Rate
+Recipe2 <- recipe(heart_rate ~ ., data = train_data) 
+kernlab_mod <- 
+  svm_poly(
+    mode = "regression",
+    engine = "kernlab",
+    cost = NULL,
+    degree = NULL,
+    scale_factor = NULL,
+    margin = NULL
+  )
+Recipe2_wflow <- 
+  workflow() %>% 
+  add_model(kernlab_mod) %>% 
+  add_recipe(Recipe2)
+Recipe2_fit <- 
+  Recipe2_wflow %>% 
+  fit(data = train_data)
+Recipe2_fit %>% 
+  extract_fit_parsnip()
+```
+
+```{r}
+#TEST
+predict(Recipe_fit, test_data)
+Recipe_aug <- augment(Recipe_fit, test_data)
+mean(Recipe_aug$.resid)
+#TEST 2
+predict(Recipe2_fit, test_data)
+Recipe2_aug <- augment(Recipe2_fit, test_data)
+mean(Recipe2_aug$.resid)
+```
+
+```{r}
+# Make Prediction off Chosen Values 
+date <-	"2024-06-21"
+heart_rate <-177	
+cadence	<- 83
+temperature	<- 25.5
+numeric_date	<-	19903
+power <- 250
+print(date)
+date<- as.Date(date)
+minPredict <- data.frame(date, heart_rate, cadence, power, temperature, numeric_date)
+print(minPredict)
+#Values
+pred <- predict(Recipe_fit, minPredict)
+pred2 <- predict(Recipe2_fit, minPredict)
+print(pred)
+print(pred2)
+```
