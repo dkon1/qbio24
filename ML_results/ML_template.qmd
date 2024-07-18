@@ -1,0 +1,19 @@
+---
+title: "Data analysis template"
+format: html
+editor: visual
+---
+
+Load some packages
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(palmerpenguins)
+```
+
+## Data description
+
+```{r}
+
+```
