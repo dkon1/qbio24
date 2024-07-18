@@ -1,0 +1,166 @@
+---
+title: "KNN tutorial"
+author: "Dmitry Kondrashov"
+format: html
+editor: visual
+---
+
+### Loading libraries
+
+```{r}
+#| include: false
+#| echo: false
+library(tidyverse)
+library(palmerpenguins)
+library(ISLR2)
+library(class)
+library(FNN)
+```
+
+### Loading data
+
+Report how many variables are in the data frame penguins; how many are numeric and categorical, and how many observations.
+
+```{r}
+data("penguins")
+glimpse(penguins)
+head(penguins)
+```
+
+### Fitting a function and error
+
+$f(X)$ is a model for predicting some response variable $Y$. The differences between prediction and data points are called *errors* or *residuals*.
+
+```{r}
+income <- read_csv("https://www.statlearning.com/s/Income1.csv",
+         col_types = "-dd",
+         skip = 1,
+         col_names = c("row", "Education","Income")) 
+
+income |> 
+  mutate(res = residuals(loess(Income ~ Education)))  |>  
+  ggplot(aes(x = Education, y = Income)) +
+  geom_point(shape = 20, size = 4, color = "red") +
+  geom_segment(aes(xend = Education, yend = Income - res)) +
+  geom_smooth(method = "loess", se = FALSE, color = "blue",
+              formula = "y ~ x") +
+  scale_x_continuous(breaks = seq(10,22,2)) +
+  theme_bw() +
+  theme(panel.grid = element_blank()) +
+  labs(x = "Years of Education",
+       caption = "Source: https://www.statlearning.com/s/Income1.csv | A loess fit shown in blue") 
+
+loess_res <- residuals(loess(Income ~ Education, data = income))
+print(mean(loess_res^2))
+
+lm_res <- residuals(lm(Income ~ Education, data = income))
+print(mean(lm_res^2))
+```
+
+A linear fit to a two-variable data set, with prediction for $X=1$ shown in red:
+
+```{r}
+ISLR2::Portfolio %>% 
+  ggplot(aes(X, Y)) +
+  geom_point(shape = 21, color = "gray50") +
+  geom_smooth(method = "lm", color = "red", 
+              se = FALSE, formula = "y ~ x") +
+  geom_point(x = 1, y = 0.5, shape = 20, 
+             color = "red", size = 8) +
+  geom_vline(xintercept = 1, color = "red") +
+  theme_bw() +
+  theme(panel.grid = element_blank()) +
+  labs(caption = "Source: ISLR2::Portfolio | A linear fit shown in red") 
+```
+
+Linear regression on penguins
+
+```{r}
+penguins |> 
+  drop_na(body_mass_g, flipper_length_mm) |> 
+  mutate(res = residuals(lm(body_mass_g ~ flipper_length_mm)))  |>  
+  ggplot(aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(shape = 20, size = 4, color = "red") +
+  geom_segment(aes(xend = flipper_length_mm, yend = body_mass_g - res)) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue",
+              formula = "y ~ x") +
+ # scale_x_continuous(breaks = seq(10,22,2)) +
+  theme_bw() +
+ # theme(panel.grid = element_blank()) +
+  labs(x = "Flipper length (mm)", y= 'body mass (g)')
+ #      caption = "Source: https://www.statlearning.com/s/Income1.csv | A loess fit shown in blue") 
+
+#plot(body_mass_g ~ flipper_length_mm, data = penguins)
+```
+
+### Using KNN for regression and classification
+
+### KNN regression
+
+The function `knn.reg` from the package `FNN` performs knn regression on a given training set (of numeric variables) and predicts values on a specified test set. One doesn't actually have to provide a test set at all, in which case it will predict the response values for all the training points. Here is an example of how it works on the penguin data:
+
+```{r}
+data("penguins")
+# data cleaning
+penguin_data <- penguins |> 
+  dplyr::select(bill_length_mm, flipper_length_mm) |> 
+  drop_na() 
+# need to separate the X and Y variables into different data frames
+X_data <- penguin_data %>% dplyr::select(bill_length_mm)
+Y_data <- penguin_data$flipper_length_mm
+```
+
+Now we can use the `knn.reg` function and plot the results:
+
+```{r}
+heart_pred <- knn.reg(train = X_data,  y=Y_data,  k = 5)
+
+
+```
+
+Calculate the errors by taking the difference between the predicted values and the actual values, then print out the variance:
+
+```{r}
+
+```
+
+Now split the data set into a training set and a test set, and repeat the knn prediction, using the option `test=`
+
+```{r}
+
+```
+
+Make a plot of the data and the KNN prediction
+
+```{r}
+
+```
+
+### KNN classification
+
+The function `knn` from the package `class` performs classification, given a set of training data points with a given categorical variable. For example, with penguin data we can use the four numeric variables as our training data, and the species as the response variable:
+
+```{r}
+penguin_numeric <- penguins |> drop_na() |>
+  dplyr::select(bill_length_mm, flipper_length_mm, body_mass_g, bill_depth_mm)
+
+spec <- penguins |> drop_na() |>
+  dplyr::select(species)
+
+
+```
+
+Here is how to perform KNN classification, with knn_out containing the classifications for data points in the `test` input:
+
+```{r}
+knn_out <- knn(train = penguin_numeric, 
+         test = penguin_numeric, 
+         cl = spec$species, 
+         k = 5)
+```
+
+Calculate and print the confusion matrix, and the total accuracy, the fraction of correct species classifications:
+
+```{r}
+
+```

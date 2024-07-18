@@ -1,0 +1,96 @@
+---
+title: "Linear regression tutorial"
+author: "Dmitry Kondrashov"
+format: html
+editor: visual
+---
+
+### Loading libraries
+
+```{r}
+#| include: false
+#| echo: false
+library(tidyverse)
+library(palmerpenguins)
+library(ISLR2)
+library(class)
+library(FNN)
+```
+
+### Loading data
+
+Report how many variables are in the data frame penguins; how many are numeric and categorical, and how many observations.
+
+```{r}
+data("penguins")
+glimpse(penguins)
+head(penguins)
+```
+
+### Simple one-variable regression
+
+Below is a scatterplot of two numeric variables along with a least-squares regression line and residuals of regression indicated as vertical line segments.
+
+```{r}
+penguins |> 
+  drop_na(body_mass_g, flipper_length_mm) |> 
+  mutate(res = residuals(lm(body_mass_g ~ flipper_length_mm)))  |>  
+  ggplot(aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(shape = 20, size = 4, color = "red") +
+  geom_segment(aes(xend = flipper_length_mm, yend = body_mass_g - res)) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue",
+              formula = "y ~ x") +
+  theme_bw() +
+  labs(x = "Flipper length (mm)", y= 'body mass (g)')
+
+```
+
+### Linear regression nuts and blots
+
+Run the function `lm` on two numeric variables, and print out the summary of results.
+
+```{r}
+output <- lm(body_mass_g ~ flipper_length_mm, data = penguins)
+summary(output)
+```
+
+Calculate the variance of residuals, the total variance of the response variable, and the total variance of predicted values. Compute the coefficient of determination r-squared from these values and compare with the output of `lm`
+
+```{r}
+
+ssr <- var(output$residuals)
+vary <- var(penguins$body_mass_g, na.rm = T)
+var_pred <- var(output$fitted.values)
+print(var_pred/vary)
+print(ssr/vary)
+print(var_pred/vary + ssr/vary)
+mean(output$residuals)
+```
+
+Print out the values of the parameters and their 95% confidence intervals
+
+```{r}
+print(output$coefficients)
+
+
+confint(output, "flipper_length_mm", level=0.99)
+
+confint(output, "(Intercept)", level=0.99)
+```
+
+Use the parameters obtained from regression to predict a value of the response variable for a new value of the explanatory variable that you made up (could be extrapolation or interpolation)
+
+```{r}
+x <- 300
+pred_mass <- output$coefficients[1] + output$coefficients[2]*x
+print(pred_mass)
+```
+
+Divide the data set into a training set and test set (as we did in week 2 tutorial). Run `lm` on the training set and obtain the best-fit parameters, then use them to predict values of the response variable in the test set. Calculate the mean root squared error for the training set and the test set. Is there evidence of overfitting?
+
+```{r}
+penguin_data <- penguins |> 
+  dplyr::select(flipper_length_mm, body_mass_g, bill_length_mm, bill_depth_mm) |> 
+  drop_na()
+
+```
