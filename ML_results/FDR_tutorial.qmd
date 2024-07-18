@@ -1,0 +1,311 @@
+---
+title: "Multiple hypothesis testing tutorial"
+format: 
+  html:
+    self-contained: true
+editor: visual
+---
+
+```{r}
+#| include: false
+library(tidyverse)
+library(tidymodels)
+library(palmerpenguins)
+```
+
+## Multiple hypothesis testing and error types
+
+```{r}
+data("penguins")
+pen_data <- penguins |> drop_na() 
+```
+
+### Generating fake data for the independence hypothesis test
+
+The chi-squared test is used to test the hypothesis that two categorical variable are independent. For example, let us take the penguin data and test the hypothesis that sex and species are independent.
+
+Use the `table` function to calculate the frequency table for the two variables in the data set, and then use the function `chisq.test` to perform the test and report the p-value.
+
+```{r}
+dt <- table(pen_data$species, pen_data$year)
+
+print(dt)
+
+chi_out <- chisq.test(dt)
+
+print(chi_out)
+```
+
+What does the p-value mean? What conclusion can we draw from the test result?
+
+We can also use ANOVA to test the hypothesis that bill length is the same in all species:
+
+```{r}
+
+anova_out <- aov(bill_length_mm ~ species, data = pen_data)
+
+lm_out <- lm(bill_length_mm ~ species, data = pen_data)
+
+
+summary(anova_out)
+
+print(TukeyHSD(anova_out))
+
+summary(lm_out)
+```
+
+What does the p-value mean? What conclusion can we draw from the test result?
+
+### Types of errors
+
+Tests are not perfect and can reach the wrong conclusions. Rejecting a true null hypothesis is called a "Type 1 error", while not rejecting a false null hypothesis is called a "Type 2 error". However, in practice one can't determine when you've made a mistake, since we don't know the truth about the hypothesis we're testing!
+
+The chunk below contains a function that generates a fake data set with two different variables: genotype (either A or B) and health status ('D' or 'H'). The input arguments control the true (or population) probability of disease for genotype A, same for genotype B, and the number of individuals in both sample groups.
+
+```{r}
+gen_ind_test <- function(probA, probB, samp_size) {
+  health_states <- c('D', 'H') # health states 'D' and 'H'
+  dis_genA <- sample(health_states, samp_size, replace = TRUE, prob = c(probA, 1-probA)) # generate a vector of health status
+  dis_genB <- sample(health_states, samp_size, replace = TRUE, prob = c(probB, 1-probB)) # generate a vector of health status
+  data_vec <- c(table(dis_genA), table(dis_genB))
+  data_mat <- matrix(data_vec, nrow=2, ncol=2) # put together a data matrix
+  chisq_result <- chisq.test(data_mat) # run chi-squared test
+  return(chisq_result$p.value) # output the p-value
+} 
+```
+
+1.  Set the sample size to a low value, and the probabilities of disease to be the same for both genotypes. Call the function and print out the p-value. Did the test make the correct decision (according to your favorite significance level)? If not, what type of error did it make?
+
+```{r}
+
+```
+
+2.  Set the sample size to a low value, and the probabilities of disease to be somewhat different for both genotypes. Call the function and print out the p-value. Did the test make the correct decision (according to your favorite significance level)? If not, what type of error did it make?
+
+    ```{r}
+
+    ```
+
+3.  Set the sample size to a higher value, and keep the probabilities of disease as they were in the last question. Call the function and print out the p-value. Did the test make the correct decision (according to your favorite significance level)? If not, what type of error did it make?
+
+    ```{r}
+
+    ```
+
+### Multiple hypothesis tests
+
+To investigate the error rates more carefully, let us call the function repeatedly for different scenarios.
+
+1.  Call the function many times (e.g. 1000) using `replicate` for a small sample size (e.g. 100) with no effect of genotype on disease to calculate the type 1 error rate (the fraction of times that a true null hypothesis is rejected).
+
+```{r}
+probA <- 0.1
+probB <- 0.1
+num <- 100
+pvals <- replicate(1000, gen_ind_test(probA, probB, num))
+plot(-log(pvals), type = 'h')
+alpha <- 0.01
+print("Fraction of rejections at alpha = 0.01:")
+print(sum(pvals < alpha))
+```
+
+2.  Call the function many times (e.g. 1000) for a small sample size (e.g. 100) with a small effect of genotype on disease (e.g. a difference of a few percent) to calculate the type 2 error rate (the fraction of times that a false null hypothesis is not rejected).
+
+    ```{r}
+
+    probA <- 0.1
+    probB <- 0.2
+    num <- 100
+    pvals <- replicate(1000, gen_ind_test(probA, probB, num))
+    plot(-log(pvals), type = 'h')
+    alpha <- 0.01
+    print("Fraction of rejections at alpha = 0.01:")
+    print(sum(pvals < alpha))
+    ```
+
+3.  Call the function many times (e.g. 1000) for a small sample size (e.g. 100) with a large effect of genotype on disease (e.g. a difference of ten or more percent) to calculate the type 2 error rate (the fraction of times that a false null hypothesis is not rejected).
+
+```{r}
+
+```
+
+4.  Call the function many times (e.g. 1000) for a large sample size (e.g. 1000) with a small effect of genotype on disease (e.g. a difference of a few percent) to calculate the type 2 error rate (the fraction of times that a false null hypothesis is not rejected).
+
+```{r}
+
+```
+
+### p-value corrections
+
+Depending on the assumptions that you made, your study may have a high FDR. To reduce it, you may use different corrections for the p-values, which make rejecting the null hypothesis more stringent. The simplest one is the Bonferroni correction, which multiplies all p-values by a constant amount. The function `p.adjust` applies a correction to a vector of p-values; in the example below it is applied to the p-value from the chi-squared test (it doesn't do any adjustments to a single p-value, but will for a whole array of p-values).
+
+```{r}
+p.adjust(pvals, method = "bonferroni")
+```
+
+A more sophisticated correction is the Holm method:
+
+```{r}
+p.adjust(chi_out$p.value, method = "holm")
+```
+
+As well as the Benjamini-Hochberg correction:
+
+```{r}
+p.adjust(chi_out$p.value, method = "BH")
+```
+
+Produce a vector of 1000 p-values using the simulation function above with equal probabilities for genotypes A and B and make a "Manhattan plot" (histogram of -log of the p-values). Report how many of them are significant at a cutoff level of your choice.
+
+```{r}
+
+```
+
+Then apply each of the corrections above and make a Manhattan plot of the adjusted p-values. Report the number of significant p-values at your level of choice.
+
+Bonferroni correction:
+
+```{r}
+probA <- 0.1
+probB <- 0.1
+num <- 100
+pvals <- replicate(1000, gen_ind_test(probA, probB, num))
+pvals <- p.adjust(pvals, method = "bonferroni")
+plot(-log(pvals), type = 'h')
+alpha <- 0.01
+print("Fraction of rejections at alpha = 0.01:")
+print(sum(pvals < alpha))
+```
+
+Holm correction:
+
+```{r}
+probA <- 0.1
+probB <- 0.12
+num <- 300
+pvals <- replicate(1000, gen_ind_test(probA, probB, num))
+pvals <- p.adjust(pvals, method = "holm")
+plot(-log(pvals), type = 'h')
+alpha <- 0.01
+print("Fraction of rejections at alpha = 0.01:")
+print(sum(pvals < alpha))
+```
+
+Benjamini-Hochberg correction:
+
+```{r}
+
+```
+
+### False Discovery Rate and Positive Predictive Value
+
+The **false discovery rate** is the fraction of false positive results (type 1 errors) out of all positive results. This is especially important to consider in studies that perform multiple hypothesis tests hoping to find a an effect. In addition to the error rates we calculated above, what else do we need to know to calculate it? Make an assumption so you can calculate the FDR for one of the above scenarios:
+
+```{r}
+probA <- 0.1
+probB <- 0.2
+num <- 100
+pvals1 <- replicate(100, gen_ind_test(probA, probB, num))
+
+probA <- 0.2
+probB <- 0.2
+num <- 100
+pvals2 <- replicate(900, gen_ind_test(probA, probB, num))
+pvals <- c(pvals1, pvals2)
+pvals <- p.adjust(c(pvals1, pvals2), method = "BH")
+
+plot(-log(pvals), type = 'h')
+alpha <- 0.01
+print("Fraction of rejections at alpha = 0.01:")
+print(sum(pvals < alpha))
+
+TPR <- sum(pvals[1:100] < alpha)/100
+FPR <- sum(pvals[101:1000] < alpha)/900
+
+print("FDR:")
+print(FPR/(TPR+FPR))
+```
+
+### Calculation of ROC curve
+
+Write a function to plot an ROC curve for the hypothesis test classification of the generated hypotheses with a given fraction of true and false nulls.
+
+\
+This function should have the following inputs:
+
+-   the fraction of true null hypotheses
+
+-   sample size
+
+-   number of hypotheses to test
+
+-   values of ProbA and ProbB for the true hypothesis (equal ones)
+
+-   values of ProbA and ProbB for the false hypothesis (different ones)
+
+Inside the function:
+
+-   generate p-values for all of the hypotheses
+
+-   initialize vectors of true positive rates, false positive rates
+
+-   use a for loop for a range of significance levels alpha
+
+-   compare the p-values to alpha, decide whether to reject the null
+
+-   assign the fraction of true positives (false hypotheses that were rejected) to the vector element
+
+-   assign the fraction of false positives (true hypotheses that were rejected) to the vector element
+
+-   end for loop
+
+-   plot the true positive rate as a function of the false positive rate
+
+-   return the AUC (the mean value of the true positive rate)
+
+```{r}
+
+```
+
+### GWAS simulator function
+
+The following function simulates multiple hypothesis testing with a given test specificity, test sensitivity, prior probability (fraction of hypotheses which are truly false) and number SNPs (hypothesis tests). It simulates each hypothesis test using two random number generators (one for the truth of the hypothesis and one for the test result) and returns the calculated PPV.
+
+```{r}
+gwas_simulator <- function (test_spec, test_sens, prior, num_snps){
+  # first, let's decide which SNPs are not associated with the disease
+  no_association <- runif(num_snps) < prior
+  # then, let's see whether our test can detect the difference.
+  # for each SNPs, we simulate the test by drawing a random number between 0 and 1
+  random_tests <- runif(num_snps)
+  # TRUE NEGATIVES: there is no association, and we are correct because we have enough specificity
+  TN <- sum(random_tests[no_association] < test_spec)
+  # FALSE POSITIVES: there is no association, but we find one anyway (TYPE I ERROR)
+  FP <- sum(no_association) - TN
+  
+  # TRUE POSITIVES: there is an association and our test is sensitive enough to detect it
+  TP <- sum(random_tests[!no_association] < test_sens)
+  # FALSE NEGATIVES: there is an association, but we cannot detect it (TYPE II ERROR)
+  FN <- sum(!no_association) - TP
+
+  # return the PPV (positive predictive value) 
+  return (TP / (TP + FP))
+}
+
+```
+
+Using this simulation function, make a plot of the false discovery rate as a function of prior probability (make a vector of values of prior probability and use `replicate` to apply the function to all the priors at once!)
+
+```{r}
+priors <- seq(0, 1, 0.01)
+num_snps <- 1000
+test_sens <- 0.5
+test_spec <- 0.993
+
+
+PPVs <- sapply(priors, function(x) {gwas_simulator(test_spec, test_sens, prior = x, num_snps)})
+
+FDRs <- 1- PPVs
+
+plot(priors, FDRs, type = 'l')
+```

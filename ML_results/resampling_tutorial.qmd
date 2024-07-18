@@ -1,0 +1,180 @@
+---
+title: "Resampling tutorial"
+format: 
+  html:
+    self-contained: true
+editor: visual
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(ggfortify) # for autoplot
+library(discrim)
+library(klaR)
+library(rpart.plot)
+library(vip)
+library(factoextra)
+library(purrr)
+```
+
+## Cross-validation
+
+Load data set 'ischemic stroke' with response variable `stoke` with other variables used as predictors:
+
+```{r}
+data(ischemic_stroke, package = "modeldata")
+glimpse(ischemic_stroke)
+```
+
+Let us train a classifier on this data using a single split into training and test sets:
+
+```{r}
+
+# split data into  training and test sets 
+IS_split <- initial_split(ischemic_stroke, prop = 3/4)
+
+# Create data frames for the two sets:
+IS_train <- training(IS_split)
+IS_test  <- testing(IS_split)
+
+# create recipte
+
+# create model specification
+
+# create workflow
+
+# fit the model on the training set using the workflow
+
+# generate predictions for the test set
+
+# calculate the confusion matrix, overall accuracy, roc
+
+```
+
+But better try k-fold validation!
+
+```{r}
+#folds <- vfold_cv(IS_train, v = 10)
+
+#fit_ <- 
+#  worflow_ |>  
+#  fit_resamples(folds)
+
+#collect_metrics(fit_glm_rs)
+```
+
+## Titanic
+
+```{r}
+library(titanic)
+glimpse(titanic)
+# clean data
+
+# split data into  training and test sets 
+
+
+# Create data frames for the two sets:
+
+# create recipte
+
+# create model specification
+
+# create workflow
+
+# fit the model on the training set using the workflow
+
+# generate predictions for the test set
+
+# calculate the confusion matrix, overall accuracy, roc
+
+```
+
+```{r}
+#folds <- vfold_cv(IS_train, v = 10)
+
+#fit_ <- 
+#  worflow_ |>  
+#  fit_resamples(folds)
+
+#collect_metrics(fit_glm_rs)
+```
+
+### Bootstrap: parameter estimation
+
+The following will simulate 2000 samples (splits) from the data set penguins (bootstrap):
+
+```{r}
+data("penguins")
+pen_clean <- penguins |> 
+  drop_na(body_mass_g, flipper_length_mm) 
+
+boots <- bootstraps(pen_clean, times = 2000, apparent = TRUE)
+
+```
+
+Here we define a new function to performs linear regression on any given split:
+
+```{r}
+lm_bootstrap <- function(split) {
+    lm(body_mass_g ~ flipper_length_mm, analysis(split))
+}
+
+lm_boot_models <-
+  boots |> 
+  mutate(model = map(splits, lm_bootstrap),
+         coef_info = map(model, tidy))
+```
+
+Based on the models produced for all the splits, we can calculate confidence intervals for the parameters:
+
+```{r}
+boot_coefs <- 
+  lm_boot_models |>  
+  unnest(coef_info)
+
+percentile_intervals <- int_pctl(lm_boot_models, coef_info)
+percentile_intervals
+```
+
+Optional: visualize the different regression lines (warning: takes ver long):
+
+```{r}
+boot_aug <- 
+  boot_models |>  
+  sample_n(100) |>  
+  mutate(augmented = map(model, augment)) |> 
+  unnest(augmented)
+
+boot_aug |> ggplot( aes(x =  flipper_length_m, y = body_mass_g )) +
+  geom_line(aes(y = .fitted, group = id), alpha = .2, col = "blue") +
+  geom_point()
+```
+
+### Bootstrap: hypothesis testing
+
+We will use a special set of functions to define a hypothesis, make calculations, and then simulate the null distribution to calculate p-values. The following calculates the difference in means of `calc_vol` between samples divided by stroke categories (yes or no):
+
+```{r}
+diff_est <- ischemic_stroke |> 
+  specify(calc_vol  ~ stroke) |> 
+  calculate(stat="diff in means", order = c("yes", "no"))
+```
+
+The following simulates the null hypothesis distribution which assumes there is no difference between
+
+```{r}
+null_dist <- ischemic_stroke |> 
+  specify(calc_vol  ~ stroke) |> 
+  hypothesize(null = "independence") |> 
+  generate(reps = 500, type = "permute") |> 
+  calculate(stat="diff in means", order = c("yes", "no"))
+```
+
+The following visualizes the null distribution and shows where the observed difference lies:
+
+```{r}
+null_dist |> 
+  visualize()  +
+  shade_p_value(obs_stat = diff_est, direction = "one-sided")
+```

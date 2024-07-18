@@ -1,0 +1,376 @@
+---
+title: "Dimensionality reduction and clustering tutorial"
+format: 
+  html:
+    self-contained: true
+editor: visual
+---
+
+```{r}
+#| include: false
+library(tidyverse)
+library(tidymodels)
+library(ggmap) # for ggimage
+library(ggfortify) # for autoplot
+library(factoextra)
+library(NbClust)
+library(palmerpenguins)
+library(tidyclust)
+```
+
+## Dimensionality reduction using PCA
+
+### Data preparation
+
+Load the data set and separate it into the numeric variables from the data set `penguins` to be simplified and the species variable `species` that will be left out.
+
+```{r}
+data("penguins")
+pen_data <- penguins |> drop_na() |> 
+  dplyr::select(-c(species, island, sex, year)) 
+species <- penguins |>  drop_na() |> 
+  dplyr::select(species)
+
+```
+
+### PCA using available function
+
+Perform principal component analysis on the numeric variables using the function `prcomp` using `scale=TRUE` (normalizing each variable to have mean 0 and standard deviation 1)\> The output contains the standard deviations of each PC and the PCs (rotational vectors for the new coordinate system):
+
+```{r}
+pen_pca <- pen_data |> 
+  prcomp(scale = TRUE)
+
+pen_pca
+```
+
+You can extract the decomposition (or the coordinate in PC space) of each data point by using `tidy`:
+
+```{r}
+tidy(pen_pca)
+```
+
+You can also obtain the loadings of variables for each PC (the contributions of each variable). These can be printed out and visualized as follows:
+
+```{r}
+tidy(pen_pca, matrix = 'loadings')
+
+tidy(pen_pca, matrix = 'loadings') |> 
+  ggplot(aes(value, column)) +
+  facet_wrap(~ PC) +
+  geom_col() +
+  scale_x_continuous(labels = scales::percent)
+```
+
+We can print out the eigenvalues (or variances of each PC) or plot them (this is known as a "Scree plot"):
+
+```{r}
+tidy(pen_pca, matrix = "eigenvalues")
+
+tidy(pen_pca, matrix = "eigenvalues") |> 
+  ggplot(aes(PC, percent)) +
+  geom_col()
+```
+
+### PCA from scratch (using SVD)
+
+Modify the `ir` data set by scaling it before computing singular value decomposition (`svd`) and transforming the data set to be projected onto the principal components (`Y`):
+
+```{r}
+Xs <- scale(pen_data, center = TRUE, scale = TRUE)
+# compute SVD
+X_svd <- svd(Xs)
+# Y = US is the transformed data
+Y <- X_svd$u %*% diag(X_svd$d)
+```
+
+Make a plot of the first two columns of `Y`, corresponding to projection of the data set onto the first two PCs, each data point colored by species:
+
+```{r}
+PCA_1 <- species  |>  
+  add_column(PC1 = Y[,1], PC2 = Y[,2])
+ggplot(PCA_1) + 
+  aes(x = PC1, y = PC2, group = species, colour = species) + geom_point()
+```
+
+Compute the fraction of total variance explained by first two PCs, using the singular values (which correspond to the standard deviation explained by each PC, which is why the need to be squared):
+
+```{r}
+print(paste("Fraction of variance in 1st PC:",X_svd$d[1]^2/sum(X_svd$d^2)))
+print(paste("Fraction of variance in 2ns PC:",X_svd$d[2]^2/sum(X_svd$d^2)))
+
+```
+
+### Nice PCA visualization
+
+Use `prcomp` and then `fviz_pca_ind` to visualize the results for all data points:
+
+```{r}
+
+fviz_pca_ind(pen_pca,
+             col.ind = factor(species$species),
+             label = 'none',
+             addEllipses=TRUE, 
+             ellipse.level=0.9, 
+             palette = "Dark2")
+```
+
+Use `fviz_eig` to make a Scree plot:
+
+```{r}
+fviz_eig(pen_pca)
+```
+
+### PCA for digits dataset
+
+Load the data set of images of handwritten digits:
+
+```{r}
+dt <- read_csv("https://raw.githubusercontent.com/StefanoAllesina/BIOS_26318/master/data/handwritten_digits.csv") |> 
+  arrange(id, x, y)
+```
+
+### PCA from scratch (using SVD)
+
+Wrangle the data set to the format for PCA, where each pixel is a column and each image is a row, and call it `X`, then scale it and run it through `svd`:
+
+```{r}
+# make into a data matrix with pixels as cols
+dt_wide <- pivot_wider(dt |> dplyr::select(-x, -y), 
+                       names_from = pixel, 
+                       values_from = value)
+X <- (as.matrix(dt_wide |>  dplyr::select(-id, -label)))
+# make col means = 0
+Xs <- scale(X, center = TRUE, scale = TRUE)
+# compute SVD
+X_svd <- svd(Xs)
+# Y = US is the transformed data
+Y <- X_svd$u %*% diag(X_svd$d)
+```
+
+```{r}
+dt_pca <- dt_wide |> 
+  prcomp(scale = TRUE)
+
+tidy(dt_pca, matrix = "eigenvalues") |> 
+    ggplot(aes(PC, percent)) +
+  geom_col()
+```
+
+Make a new data frame called `PCA_1`, combining the two categorical variables `id` and `label`, and two projection coefficients of the data set onto the first two PCs, and plot all the data with each point colored by digit:
+
+```{r}
+PCA_1 <- dt_wide |> 
+  dplyr::select(id, label) |>  
+  mutate(label = as.character(label)) |>  
+  add_column(PC1 = Y[,1], PC2 = Y[,2])
+ggplot(PCA_1) + 
+  aes(x = PC1, y = PC2, label = id, group = label, colour = label) + 
+  geom_text()
+```
+
+Compute the fraction of total variance explained by first two PCs, using the singular values (which correspond to the standard deviation explained by each PC, which is why the need to be squared):
+
+```{r}
+print(paste("Fraction of variance in 1st PC:",X_svd$d[1]^2/sum(X_svd$d^2)))
+print(paste("Fraction of variance in 2nd PC:",X_svd$d[2]^2/sum(X_svd$d^2)))
+```
+
+### PCA the easy way using prcomp
+
+Use `prcomp` and then `fviz_pca_ind` to visualize the results for all data points:
+
+```{r}
+X <- dt_wide |>  dplyr::select(-id, -label)
+dig_pca <- prcomp(X, scale. = TRUE)
+
+fviz_pca_ind(dig_pca,
+             col.ind = factor(dt_wide$label),
+             label = 'none',
+             addEllipses=TRUE, 
+             ellipse.level=0.9, 
+             palette = "Dark2")
+```
+
+Use `fviz_eig` to make a Scree plot:
+
+```{r}
+fviz_eig(dig_pca)
+```
+
+## Clustering
+
+### Example: K-means clustering
+
+Here we use the standard `kmeans` function to perform clustering and compare the predicted clusters with the species of the penguins:
+
+```{r}
+penguins_km <- kmeans(scale(pen_data), 3) # perform K-means clustering
+penguins_km
+
+table(species$species, penguins_km$cluster) # compare the clustering labels with the species
+```
+
+The results can be visualized by plotting the points using a PCA projection, done automatically by function `fviz_cluster`:
+
+```{r}
+fviz_cluster(list(data = scale(pen_data), cluster = penguins_km$cluster),
+ellipse.type = "norm", geom = "point", stand = FALSE, palette = "jco", ggtheme = theme_classic())
+```
+
+### clustering using tidymodels
+
+We can use tidymodels tools to perform k-means clustering, by setting up a specification and then using `fit` to apply it to our data set:
+
+```{r}
+
+kmeans_spec <- k_means(num_clusters = 3) |>
+  set_mode("partition") |>
+  set_engine("stats")# |>
+  #set_args(nstart = 20)
+
+kmeans_spec
+
+kmeans_fit <- |> |> |> 
+
+tidy(kmeans_fit)
+
+```
+
+Then we the fitted cluster parameters to the data set using `augment` and then plot the output using `fviz_cluster`:
+
+```{r}
+pen_km <- augment(kmeans_fit, new_data = as_tibble(scale(pen_data))) 
+
+fviz_cluster(list(data = scale(pen_data), cluster = pen_km$.pred_cluster),
+ellipse.type = "norm", geom = "point", stand = FALSE, palette = "jco", ggtheme = theme_classic())
+```
+
+How would you describe the quality of the clustering? What might you do to improve it?
+
+### Hyperparameter tuning
+
+What is the optimal number of clusters?
+
+```{r}
+kmeans_spec_tuned <- kmeans_spec |> 
+  set_args(num_clusters = tune())
+
+
+pca_recipe <- 
+  recipe(formula =  ~ ., data = pen_data) |> 
+  step_novel(all_nominal_predictors()) |> 
+  step_dummy(all_nominal_predictors()) |> 
+  step_zv(all_predictors()) |> 
+  step_normalize(all_predictors()) |>
+  step_pca(all_predictors(), threshold = 1) 
+
+kmeans_wf <- workflow() |>
+  add_model(kmeans_spec_tuned) |>
+  add_recipe(pca_recipe)
+
+splits <- bootstraps(pen_data, times = 10)
+
+num_clusters_grid <- tibble(num_clusters = seq(1, 10))
+
+tune_res <- tune_cluster(
+  object = kmeans_wf,
+  resamples = splits,
+  grid = num_clusters_grid
+)
+
+tune_res |>
+  collect_metrics()
+
+tune_res |>
+  autoplot()
+```
+
+Using the so-called "elbow method" we look at the decrease of the SSE within clusters and find that it has an elbow at k=2.
+
+## Hierarchical clustering
+
+```{r}
+penguins_hc <- hcut(scale(pen_data), k = 3, hc_method = "single") # perform hierarchical clustering
+
+table(penguins_hc$cluster, species$species) # compare the clustering labels with the 
+
+fviz_cluster(list(data = scale(pen_data), cluster = penguins_hc$cluster) )
+```
+
+How would you describe the quality of the clustering? What might you do to improve it?
+
+Alternatively, we can use tidymodels tools and make a dendrogram:
+
+```{r}
+res_hclust <- hier_clust(linkage_method = "single") |> 
+  fit(~., data = as_tibble(scale(pen_data)))
+
+res_hclust |> 
+  extract_fit_engine() |> 
+  fviz_dend(main = "complete", k = 3)
+
+```
+
+```{r}
+cluster_hclust <- predict(res_hclust, new_data = as_tibble(scale(pen_data)), num_clusters = 3)
+
+table(cluster_hclust$.pred_cluster, species$species)
+```
+
+## Comparing and validation of clustering
+
+Use the analytic tools of `NbClust` and `clustertend` to evaluate the clustering performance of the two different methods.
+
+```{r}
+# Generate random data which will be first cluster
+clust1 <- data_frame(x = rnorm(200), y = rnorm(200))
+# Generate the second cluster which will ‘surround’ the first cluster
+clust2 <- data_frame(r = rnorm(200, 15, .5), 
+                     theta = runif(200, 0, 2 * pi),
+                 x = r * cos(theta), y = r * sin(theta)) |>
+  dplyr::select(x, y)
+#Combine the data
+dataset_cir <- rbind(clust1, clust2)
+#see the plot
+dataset_cir |> ggplot() + aes(x = x, y = y) + geom_point()
+```
+
+```{r}
+#Fit the k-means model
+k_clust_spher1 <- kmeans(dataset_cir, centers=2)
+#Plot the data and clusters
+fviz_cluster(list(data = dataset_cir, 
+                  cluster = k_clust_spher1$cluster),
+             ellipse.type = "norm", 
+             geom = "point", stand = FALSE, 
+             palette = "jco", 
+             ggtheme = theme_classic())
+```
+
+```{r}
+# Use hcut() which compute hclust and cut the tree
+cir_hc <- hcut(dataset_cir, k = 2, hc_method = "single")
+# Visualize dendrogram
+fviz_dend(cir_hc, show_labels = FALSE, rect = TRUE)
+```
+
+```{r}
+fviz_cluster(cir_hc, ellipse.type = "convex")
+```
+
+Elbow method:
+
+```{r}
+# Elbow method
+fviz_nbclust(scale(pen_data), kmeans, method = "wss") + geom_vline(xintercept = 2, linetype = 2)+
+labs(subtitle = "Elbow method for K-means of the scaled penguin data")
+```
+
+Silhouette plot:
+
+```{r}
+# Silhouette method
+fviz_nbclust(pen_scaled, kmeans, method = "silhouette")+ labs(subtitle = "Silhouette method for k-means")
+
+```

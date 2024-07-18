@@ -1,0 +1,441 @@
+---
+title: "Model selection in regression tutorial"
+format: 
+  html:
+    self-contained: true
+editor: visual
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(ggfortify) # for autoplot
+library(discrim)
+library(klaR)
+library(rpart.plot)
+library(vip)
+library(factoextra)
+library(purrr)
+library(leaps)
+```
+
+## Model comparison using AIC and BIC
+
+Here we use regression on the penguins data set to predict body mass using only numeric predictors (three body measurements and year):
+
+```{r}
+library(palmerpenguins)
+data("palmerpenguins::penguins")
+
+pen_clean <- penguins |> 
+  dplyr::select(-c(island, sex, species)) |> 
+  drop_na() 
+```
+
+First, let us run linear regressions using individual variables:
+
+```{r}
+
+output <- lm(body_mass_g ~ flipper_length_mm, data = pen_clean)
+summ <- summary(output)
+print(paste("R^2:", summ$r.squared, "AIC:", AIC(output), "BIC:", BIC(output)))
+
+print(paste("Model likelihood:", logLik(output)))
+
+output <- lm(body_mass_g ~ bill_depth_mm, data = pen_clean)
+summ <- summary(output)
+print(paste("R^2:", summ$r.squared, "AIC:", AIC(output), "BIC:", BIC(output)))
+print(paste("Model likelihood:", logLik(output)))
+
+output <- lm(body_mass_g ~ bill_length_mm, data = pen_clean)
+summ <- summary(output)
+print(paste("R^2:", summ$r.squared, "AIC:", AIC(output), "BIC:", BIC(output)))
+print(paste("Model likelihood:", logLik(output)))
+
+#output <- lm(body_mass_g ~ year, data = pen_clean)
+#summ <- summary(output)
+#print(paste("R^2:", summ$r.squared, "AIC:", AIC(output), "BIC:", BIC(output)))
+
+
+```
+
+Now try using pairs of the three most promising variables and compare their prediction quality (measured by R-squared, AIC, and BIC) to the individual variables:
+
+```{r}
+
+output <- lm(body_mass_g ~ flipper_length_mm + bill_depth_mm, data = pen_clean)
+summ <- summary(output)
+print(paste("R^2:", summ$r.squared, "AIC:", AIC(output), "BIC:", BIC(output)))
+
+print(paste("Model likelihood:", logLik(output)))
+
+output <- lm(body_mass_g ~ bill_depth_mm + bill_length_mm, data = pen_clean)
+summ <- summary(output)
+print(paste("R^2:", summ$r.squared, "AIC:", AIC(output), "BIC:", BIC(output)))
+print(paste("Model likelihood:", logLik(output)))
+
+output <- lm(body_mass_g ~ flipper_length_mm + bill_length_mm, data = pen_clean)
+summ <- summary(output)
+print(paste("R^2:", summ$r.squared, "AIC:", AIC(output), "BIC:", BIC(output)))
+print(paste("Model likelihood:", logLik(output)))
+
+
+output <- lm(body_mass_g ~ ., data = pen_clean)
+summ <- summary(output)
+print(paste("R^2:", summ$r.squared, "AIC:", AIC(output), "BIC:", BIC(output)))
+print(paste("Model likelihood:", logLik(output)))
+```
+
+## Ridge regression
+
+Here we'll use another approach to regression, called *shrinkage*. Specifically, in *ridge* regression, a penalty is applied to make coefficients smaller, so that we minimize an adjusted sum of squared errors that has an additional term multiplied by the penalty $\lambda$.
+
+```{r}
+# Put 3/4 of the data into the training set 
+pen_split <- initial_split(pen_clean, prop = 3/4)
+
+# Create data frames for the two sets:
+pen_train <- training(pen_split)
+pen_test  <- testing(pen_split)
+
+
+pen_recipe <- 
+  recipe(body_mass_g ~ ., data = pen_train)
+
+
+ridge_spec <- linear_reg(mixture = 0, penalty = 0) |> 
+  set_mode("regression") |> 
+  set_engine("glmnet")
+
+workflow_ridge <- workflow() |> 
+  add_model(ridge_spec) |> 
+  add_recipe(pen_recipe)
+
+fit_ridge <- workflow_ridge |> 
+  fit(pen_train)
+
+tidy(fit_ridge, penalty = 0)
+
+
+
+#fit_ridge |> 
+# autoplot()
+# create model specification
+
+lm_out <- lm(body_mass_g ~ ., data = pen_train)
+
+summary(lm_out)
+```
+
+Calculate predictions for the test set:
+
+```{r}
+
+
+compare_pred <- augment(fit_ridge, new_data = pen_test) 
+
+
+compare_pred |> rsq(body_mass_g, .pred)
+
+```
+
+## Hyperparameter tuning: searching for optimal penalty
+
+```{r}
+
+pen_fold <- vfold_cv(pen_train, v = 10)
+
+ridge_recipe <- 
+  recipe(body_mass_g ~ ., data = pen_train) |> 
+  step_novel(all_nominal_predictors()) |>  
+  step_dummy(all_nominal_predictors()) |>  
+  step_zv(all_predictors()) |> 
+  step_normalize(all_predictors())
+
+ridge_spec <- 
+  linear_reg(penalty = tune(), mixture = 0) |> 
+  set_mode("regression") |> 
+  set_engine("glmnet")
+
+ridge_workflow <- workflow() |> 
+  add_recipe(ridge_recipe) |> 
+  add_model(ridge_spec)
+
+
+penalty_grid <- grid_regular(penalty(range = c(-5, 5)), levels = 50)
+
+
+tune_res <- tune_grid(
+  ridge_workflow,
+  resamples = pen_fold, 
+  grid = penalty_grid
+)
+```
+
+```{r}
+autoplot(tune_res)
+
+collect_metrics(tune_res)
+
+best_penalty <- select_best(tune_res, metric = "rsq")
+
+best_penalty
+```
+
+```{r}
+ridge_final <- finalize_workflow(ridge_workflow, best_penalty)
+
+ridge_final_fit <- fit(ridge_final, data = pen_train)
+
+augment(ridge_final_fit, new_data = pen_test) |>
+  rsq(truth = body_mass_g, estimate = .pred)
+```
+
+## LASSO
+
+```{r}
+lasso_spec <- linear_reg(mixture = 1, penalty = 0) |> 
+  set_mode("regression") |> 
+  set_engine("glmnet")
+
+workflow_lasso <- workflow() |> 
+  add_model(lasso_spec) |> 
+  add_recipe(pen_recipe)
+
+fit_lasso <- workflow_lasso |> 
+  fit(pen_train)
+
+tidy(fit_lasso, penalty = 0)
+```
+
+```{r}
+
+compare_pred <- augment(fit_lasso, new_data = pen_test) 
+
+compare_pred |> rsq(body_mass_g, .pred)
+
+```
+
+```{r}
+
+pen_fold <- vfold_cv(pen_train, v = 10)
+
+lasso_recipe <- 
+  recipe(body_mass_g ~ ., data = pen_train) |> 
+  step_novel(all_nominal_predictors()) |>  
+  step_dummy(all_nominal_predictors()) |>  
+  step_zv(all_predictors()) |> 
+  step_normalize(all_predictors())
+
+lasso_spec <- 
+  linear_reg(penalty = tune(), mixture = 1) |> 
+  set_mode("regression") |> 
+  set_engine("glmnet")
+
+lasso_workflow <- workflow() |> 
+  add_recipe(lasso_recipe) |> 
+  add_model(lasso_spec)
+
+
+penalty_grid <- grid_regular(penalty(range = c(-5, 2)), levels = 50)
+
+
+tune_res <- tune_grid(
+  lasso_workflow,
+  resamples = pen_fold, 
+  grid = penalty_grid
+)
+```
+
+```{r}
+autoplot(tune_res)
+
+collect_metrics(tune_res)
+
+best_penalty <- select_best(tune_res, metric = "rsq")
+
+best_penalty
+```
+
+```{r}
+lasso_final <- finalize_workflow(lasso_workflow, best_penalty)
+
+lasso_final_fit <- fit(lasso_final, data = pen_train)
+
+augment(lasso_final_fit, new_data = pen_test) |>
+  rsq(truth = body_mass_g, estimate = .pred)
+```
+
+## Compare regression with and without tidymodels
+
+```{r}
+library(ISLR2)
+data("Hitters")
+```
+
+```{r}
+Hitters_clean <- Hitters |> 
+ #dplyr::select(-c(League, Division, NewLeague)) |> 
+ drop_na()
+
+
+# Put 3/4 of the data into the training set 
+Hitters_split <- initial_split(Hitters_clean, prop = 0.5)
+
+# Create data frames for the two sets:
+Hitters_train <- training(Hitters_split)
+Hitters_test  <- testing(Hitters_split)
+```
+
+Perform ridge or LASSO regression using tidymodels
+
+```{r}
+Hitters_fold <- vfold_cv(Hitters_train, v = 10)
+
+lasso_recipe <- 
+  recipe(Salary ~ ., data = Hitters_train) |> 
+  step_novel(all_nominal_predictors()) |>  
+  step_dummy(all_nominal_predictors()) |>  
+  step_zv(all_predictors()) |> 
+  step_normalize(all_predictors())
+
+lasso_spec <- 
+  linear_reg(penalty = tune(), mixture = 1) |> 
+  set_mode("regression") |> 
+  set_engine("glmnet")
+
+lasso_workflow <- workflow() |> 
+  add_recipe(lasso_recipe) |> 
+  add_model(lasso_spec)
+
+
+penalty_grid <- grid_regular(penalty(range = c(-5, 4)), levels = 50)
+
+
+tune_res <- tune_grid(
+  lasso_workflow,
+  resamples = Hitters_fold, 
+  grid = penalty_grid
+)
+```
+
+```{r}
+autoplot(tune_res)
+
+collect_metrics(tune_res)
+
+best_penalty <- select_best(tune_res, metric = "rsq")
+
+best_penalty
+```
+
+```{r}
+lasso_final <- finalize_workflow(lasso_workflow, best_penalty)
+
+lasso_final_fit <- fit(lasso_final, data = Hitters_train)
+
+augment(lasso_final_fit, new_data = Hitters_test) |>
+  rsq(truth = Salary, estimate = .pred)
+
+tidy(lasso_final_fit)
+```
+
+```{r}
+lm_out <- lm(Salary ~ ., data = Hitters_clean)
+summary(lm_out)
+```
+
+Here is the code for using base R functions:
+
+```{r}
+grid <- 10^seq(-5, 5, length = 50)
+x <- model.matrix(Salary ~ ., Hitters_clean)
+y <- Hitters_clean$Salary
+x_train <- model.matrix(Salary ~ ., Hitters_train)[, -1]
+x_test <- model.matrix(Salary ~ ., Hitters_test)[, -1]
+y_train <- Hitters_train$Salary
+y_test <- Hitters_test$Salary
+```
+
+```{r}
+lasso.mod <- glmnet(x_train, y_train, alpha = 1,
+    lambda = grid)
+plot(lasso.mod)
+###
+#set.seed(1)
+cv.out <- cv.glmnet(x_train, y_train, alpha = 1)
+plot(cv.out)
+bestlam <- cv.out$lambda.min
+lasso.pred <- predict(lasso.mod, s = bestlam,
+    newx = x_test)
+print(paste("Root mean squared error:", sqrt(mean((lasso.pred - y_test)^2))))
+print(paste("correlation:", cor(lasso.pred,y_test)))
+###
+out <- glmnet(x, y, alpha = 1, lambda = grid)
+lasso.coef <- predict(out, type = "coefficients",
+    s = bestlam)[1:20, ]
+#lasso.coef
+print(lasso.coef[lasso.coef != 0])
+
+print(bestlam)
+```
+
+## Subset selection
+
+The following code illustrates the use of *subset selection,*
+
+```{r}
+
+regfit <- regsubsets(body_mass_g ~ ., pen_clean)
+summary(regfit)
+###
+regfit.full <- regsubsets(body_mass_g ~ ., pen_clean,  nvmax = 19)
+reg.summary <- summary(regfit.full)
+###
+names(reg.summary)
+
+
+reg.summary$rsq
+###
+par(mfrow = c(2, 2))
+plot(reg.summary$rss, xlab = "Number of Variables",
+    ylab = "RSS", type = "l")
+plot(reg.summary$adjr2, xlab = "Number of Variables",
+    ylab = "Adjusted RSq", type = "l")
+###
+which.max(reg.summary$adjr2)
+points(11, reg.summary$adjr2[11], col = "red", cex = 2, 
+    pch = 20)
+###
+plot(reg.summary$cp, xlab = "Number of Variables",
+    ylab = "Cp", type = "l")
+which.min(reg.summary$cp)
+points(10, reg.summary$cp[10], col = "red", cex = 2,
+    pch = 20)
+which.min(reg.summary$bic)
+plot(reg.summary$bic, xlab = "Number of Variables",
+    ylab = "BIC", type = "l")
+points(6, reg.summary$bic[6], col = "red", cex = 2,
+    pch = 20)
+###
+plot(regfit.full, scale = "r2")
+plot(regfit.full, scale = "adjr2")
+plot(regfit.full, scale = "Cp")
+plot(regfit.full, scale = "bic")
+###
+coef(regfit.full, 4)
+```
+
+```{r}
+###
+regfit.fwd <- regsubsets(body_mass_g ~ ., pen_clean,
+    nvmax = 19, method = "forward")
+summary(regfit.fwd)
+regfit.bwd <- regsubsets(body_mass_g ~ ., pen_clean,
+    nvmax = 19, method = "backward")
+summary(regfit.bwd)
+###
+coef(regfit.full, 4)
+coef(regfit.fwd, 4)
+coef(regfit.bwd, 4)
+```

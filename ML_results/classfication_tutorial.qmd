@@ -1,0 +1,267 @@
+---
+title: "Classification tutorial"
+format: 
+  html:
+    self-contained: true
+editor: visual
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(ggfortify) # for autoplot
+library(discrim)
+library(klaR)
+library(rpart.plot)
+library(vip)
+library(factoextra)
+
+```
+
+## Generalized linear models
+
+```{r}
+# some random data
+X <- rnorm(100)
+beta_0 <- 0.35
+beta_1 <- -3.2
+linear_predictor <- beta_0 + beta_1 * X
+predicted_pi_i <- exp(linear_predictor) / (1 + exp(linear_predictor))
+ggplot(data = tibble(linear_predictor = linear_predictor, probability = predicted_pi_i)) + 
+  aes(x = linear_predictor, y = probability) + 
+  geom_point() + geom_line()
+```
+
+```{r}
+library(titanic)
+# model 0: probability of survival in general
+# regress against an intercept
+model0 <- glm(Survived ~ 1, # only intercept
+              data = titanic_train, 
+              family = "binomial") # logistic regression
+summary(model0)
+```
+
+```{r}
+# the best fitting (alpha) intercept should lead to 
+# e^alpha / (1 + e^alpha) = mean(Survived)
+mean(titanic_train$Survived)
+exp(model0$coefficients) / (1 + exp(model0$coefficients))
+```
+
+Now let's include gender:
+
+```{r}
+model1 <- glm(Survived ~ Sex, # one sex as baseline, the other modifies intercept
+              data = titanic_train,
+              family = "binomial")
+summary(model1)
+```
+
+What is the best-fitting probability of survival for male/female?
+
+```{r}
+coeffs <- model1$coefficients
+# prob women
+as.numeric(1 - 1 / (1 + exp(coeffs[1])))
+# prob men
+as.numeric(1 - 1 / (1 + exp(coeffs[1] + coeffs[2])))
+```
+
+Now let's see whether we can explain better the data using the class:
+
+```{r}
+model2 <- glm(Survived ~ Sex + factor(Pclass), # combine Sex and Pclass
+              data = titanic_train,
+              family = "binomial")
+summary(model2)
+
+```
+
+A woman in first class would have survival probability:
+
+```{r}
+coeffs <- model2$coefficients
+# prob women first class
+as.numeric(1 - 1 / (1 + exp(coeffs[1])))
+```
+
+While a man in third class:
+
+```{r}
+as.numeric(1 - 1 / (1 + exp(coeffs[1] + coeffs[2] + coeffs[4])))
+```
+
+Consider the alternative models `Survived ~ Sex * factor(Pclass)`, `Survived ~ Sex + Pclass`, `Survived ~ Sex * Pclass`, `Survived ~ Sex:factor(Pclass)`, `Survived ~ Sex:Pclass`. Explain what each model is doing in English.
+
+```{r}
+model3 <- glm(Survived ~ Sex + factor(Pclass) + Age, # combine Sex and Pclass
+              data = titanic_train,
+              family = "binomial")
+summary(model3)
+```
+
+```{r}
+model3 <- glm(Survived ~ Sex:factor(Pclass), # combine Sex and Pclass
+              data = titanic_train,
+              family = "binomial")
+summary(model3)
+```
+
+## Naive Bayes penguin example
+
+Here is an example of using `tidymodels` for classification using Naive Bayes.
+
+First, we load and clean the data, then split the observations into training and test sets.
+
+```{r}
+data("penguins")
+pen_clean <- penguins %>% drop_na()
+
+# Put 3/4 of the data into the training set 
+pen_split <- initial_split(pen_clean, prop = 3/4)
+
+# Create data frames for the two sets:
+pen_train <- training(pen_split)
+pen_test  <- testing(pen_split)
+```
+
+We then define a *model specification* using the `parsnip` package. Here is how to set up a Naive Bayes model:
+
+```{r}
+nb_spec <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("naivebayes") %>% 
+  set_args(usekernel = FALSE)  
+```
+
+Next we define the *recipe*, which specifies the data tibble and which variables will be explanatory (predictors) and which will be the response variable. In this case we will use species as the response variables, and all other variables, except for `island` as predictors.
+
+```{r}
+pen_recipe <- 
+  recipe(species ~ ., data = pen_train) %>% 
+  update_role(island, new_role = "ID")
+```
+
+Then we define the *workflow*, which combines the model with the recipe:
+
+```{r}
+pen_workflow_nb <- workflow() %>%
+  add_model(nb_spec) %>%
+  add_recipe(pen_recipe)
+```
+
+Finally, we use this workflow on the data set to fit the response variable on the training set:
+
+```{r}
+fit_nb <- pen_workflow_nb %>% fit(pen_train)
+```
+
+We can examine the contents of the fitted model, such as parameters, using `extract_fit_parsnip`. In the case of Naive Bayes, it returns the calculated mean and standard deviations for each variable, by class:
+
+```{r}
+fit_nb %>% 
+  extract_fit_parsnip() 
+```
+
+Now we can use the parameters from the parameters from the fitted model to predict the species in the test set. The function `augment` performs the prediction and adds a new column called `.pred_class` to the data frame. Then we can compare the truth with predictions using a confusion matrix or an accuracy score:
+
+```{r}
+compare_pred <- augment(fit_nb, new_data = pen_test) 
+
+compare_pred %>% conf_mat(truth = species, estimate = .pred_class)
+compare_pred %>% accuracy(truth = species, estimate = .pred_class)
+```
+
+### Use LDA for penguin classification
+
+```{r}
+ld_spec <- discrim_linear() |> 
+  set_mode("classification") |>  
+  set_engine("MASS") |>  
+  set_args(penalty = NULL, regularization_method = NULL) 
+
+
+pen_workflow_ld <- workflow() %>%
+  add_model(ld_spec) %>%
+  add_recipe(pen_recipe)
+
+
+fit_ld <- pen_workflow_ld %>% fit(pen_train)
+
+compare_pred <- augment(fit_ld, new_data = pen_test) 
+
+compare_pred %>% conf_mat(truth = species, estimate = .pred_class)
+compare_pred %>% accuracy(truth = species, estimate = .pred_class)
+```
+
+### Use QDA for penguin classification
+
+```{r}
+qd_spec <- discrim_quad()  |> 
+  set_mode("classification") |>  
+  set_engine("MASS") |>  
+  set_args(penalty = NULL, regularization_method = NULL) 
+
+pen_workflow_qd <- workflow() %>%
+  add_model(qd_spec) %>%
+  add_recipe(pen_recipe)
+
+
+fit_qd <- pen_workflow_qd %>% fit(pen_train)
+
+compare_pred <- augment(fit_qd, new_data = pen_test) 
+
+compare_pred %>% conf_mat(truth = species, estimate = .pred_class)
+compare_pred %>% accuracy(truth = species, estimate = .pred_class)
+```
+
+## 
+
+## GLM example
+
+Here is an example of using tidymodels GLM engine for predicting survival on the titanic data:
+
+```{r}
+data("titanic")
+glimpse(titanic)
+
+titanic_clean <- titanic |>  drop_na() |> 
+  mutate(survived = factor(survived)) # convert the variable into factors
+
+# Put 3/4 of the data into the training set 
+titanic_split <- initial_split(titanic_clean, prop = 3/4)
+
+# Create data frames for the two sets:
+titanic_train <- training(titanic_split)
+titanic_test  <- testing(titanic_split)
+
+
+# create recipte
+
+titanic_recipe <- 
+  recipe(survived ~ ., data = titanic_train) #|>  
+#  update_role(Name, Ticket, Cabin, PassengerId, new_role = "ID")
+
+# create model specification
+
+glm_spec <- 
+    logistic_reg() |>  
+    set_engine("glm")
+
+# create workflow
+
+titanic_workflow_glm<- workflow() |>
+  add_model(glm_spec) |>
+  add_recipe(titanic_recipe)
+
+# fit the model on the training set using the workflow
+fit_glm <- titanic_workflow_glm |> fit(titanic_train)
+
+# generate predictions for the test set
+compare_pred <- augment(fit_glm, new_data = titanic_test) 
+
+# calculate the confusion matrix, overall accuracy
+compare_pred |> conf_mat(truth = survived, estimate = .pred_class)
+compare_pred |> accuracy(truth = survived, estimate = .pred_class)
+```
