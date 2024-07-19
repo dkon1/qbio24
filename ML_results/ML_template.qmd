@@ -9,11 +9,114 @@ Load some packages
 ```{r}
 library(tidyverse)
 library(tidymodels)
+library(discrim)
 library(palmerpenguins)
 ```
 
 ## Data description
 
 ```{r}
+data("penguins")
+glimpse(penguins)
+head(penguins)
+```
 
+Print out summaries of variables, describe the variables that you plan to use in your model.
+
+## Fit model to data (regression)
+
+Clean the data and split it into training and test sets
+
+```{r}
+pen_clean <- penguins |> 
+  dplyr::select(-c(island, sex, species)) |> 
+  drop_na() 
+
+# Put 3/4 of the data into the training set 
+pen_split <- initial_split(pen_clean, prop = 3/4)
+
+# Create data frames for the two sets:
+pen_train <- training(pen_split)
+pen_test  <- testing(pen_split)
+
+
+```
+
+Create a recipe for the model and fit it on the training set
+
+```{r}
+pen_recipe <- 
+  recipe(body_mass_g ~ ., data = pen_train)
+
+
+lm_spec <- linear_reg() |> 
+  set_mode("regression") |> 
+  set_engine("lm")
+
+workflow_lm <- workflow() |> 
+  add_model(lm_spec) |> 
+  add_recipe(pen_recipe)
+
+fit_lm <- workflow_lm |> 
+  fit(pen_train)
+
+tidy(fit_lm)
+```
+
+## Predict on the test set 
+
+Here are two metrics of prediction quality: r-squared and root mean squared error:
+
+```{r}
+compare_pred <- augment(fit_lm, new_data = pen_test) 
+
+
+compare_pred |> rsq(body_mass_g, .pred)
+
+compare_pred |> rmse(body_mass_g, .pred)
+```
+
+## Fit model to data (classification)
+
+```{r}
+pen_clean <- penguins |>  
+  dplyr::select(-c(island, sex)) |> 
+  drop_na()
+
+# Put 3/4 of the data into the training set 
+pen_split <- initial_split(pen_clean, prop = 3/4)
+
+# Create data frames for the two sets:
+pen_train <- training(pen_split)
+pen_test  <- testing(pen_split)
+```
+
+Create a model and a recipe for the data and fit it on the training set:
+
+```{r}
+nb_spec <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("naivebayes") %>% 
+  set_args(usekernel = FALSE)  
+
+pen_recipe <- 
+  recipe(species ~ ., data = pen_train) 
+
+pen_workflow_nb <- workflow() %>%
+  add_model(nb_spec) %>%
+  add_recipe(pen_recipe)
+
+fit_nb <- pen_workflow_nb %>% fit(pen_train)
+
+fit_nb %>% 
+  extract_fit_parsnip() 
+```
+
+## Predict on the test set 
+
+```{r}
+compare_pred <- augment(fit_nb, new_data = pen_test) 
+
+compare_pred %>% conf_mat(truth = species, estimate = .pred_class)
+compare_pred %>% accuracy(truth = species, estimate = .pred_class)
 ```
