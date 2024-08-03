@@ -1,6 +1,8 @@
 ---
 title: "Data analysis template"
-format: html
+format: 
+  html:
+    self-contained: true
 editor: visual
 ---
 
@@ -63,7 +65,7 @@ fit_lm <- workflow_lm |>
 tidy(fit_lm)
 ```
 
-## Predict on the test set 
+## Predict on the test set
 
 Here are two metrics of prediction quality: r-squared and root mean squared error:
 
@@ -112,7 +114,7 @@ fit_nb %>%
   extract_fit_parsnip() 
 ```
 
-## Predict on the test set 
+## Predict on the test set
 
 ```{r}
 compare_pred <- augment(fit_nb, new_data = pen_test) 
